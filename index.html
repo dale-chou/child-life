@@ -10,14 +10,6 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- 引入 Firebase SDKs -->
-    <script type="module">
-        // Import the functions you need from the SDKs you need
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-app.js";
-        // Add other SDKs as needed
-    </script>
-
     <style>
         body {
             font-family: 'Inter', 'Noto Sans TC', sans-serif;
@@ -27,29 +19,18 @@
 <body class="bg-gray-100">
     <div id="root"></div>
 
-    <script type="text/babel" data-type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore.js";
-
-        // --- Firebase 設定 ---
-        // 使用者提供的 Firebase 設定物件
-        const firebaseConfig = {
-            apiKey: "AIzaSyA-Hb_ik32Gatq2qDVcWJffNrqYhY0nlhs",
-            authDomain: "smt-manager.firebaseapp.com",
-            projectId: "smt-manager",
-            storageBucket: "smt-manager.appspot.com", // 注意：通常結尾是 .appspot.com
-            messagingSenderId: "281381699788",
-            appId: "1:281381699788:web:b637dd7af978e94ab08269",
-            measurementId: "G-R01ZLTFH94"
-        };
-
-        // 初始化 Firebase
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+    <script type="text/babel">
+        // --- Firebase SDKs ---
+        // 為了在瀏覽器中直接使用，我們需要從 CDN 引入 Firebase
+        // 注意：在真實專案中，通常會使用 npm/yarn 來管理這些套件
+        // 這裡我們假設 Firebase SDK 已經透過其他方式載入，或者在未來需要時加入
+        // 為了讓這個 HTML 檔案能獨立運作，我們暫時不啟用 Firebase 功能
+        // 如果需要啟用，必須在這裡加入 Firebase 的 script 標籤
         
         // --- Helper Functions & Initial Data ---
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
         // 獲取指定日期的字串格式 YYYY-MM-DD
         const getDateString = (date) => {
@@ -99,7 +80,7 @@
 
         // --- React Components ---
 
-        function ChildTracker({ child, viewDate, userId }) {
+        function ChildTracker({ child, onUpdate, isToday, viewDateString }) {
             const [newTaskName, setNewTaskName] = React.useState('');
             const [newTaskPoints, setNewTaskPoints] = React.useState(1);
             const [newBadBehaviorName, setNewBadBehaviorName] = React.useState('');
@@ -111,15 +92,14 @@
             
             if (!child) return null;
 
-            const viewDateString = getDateString(viewDate);
-            const todayString = getDateString(new Date());
-            const isToday = viewDateString === todayString;
-
             const dailyData = child.dailyRecords ? child.dailyRecords[viewDateString] : null;
-            const childDocRef = doc(db, "users", userId, "children", child.id);
+
+            const updateChildData = (newChildData) => {
+                onUpdate(newChildData);
+            };
 
             // --- Good Task Handlers ---
-            const handleToggleTask = async (taskId) => {
+            const handleToggleTask = (taskId) => {
                 if (!isToday || !dailyData) return;
                 const task = dailyData.tasks.find(t => t.id === taskId);
                 if (!task) return;
@@ -129,16 +109,11 @@
                 const newTasks = dailyData.tasks.map(t => t.id === taskId ? { ...t, done: !t.done } : t);
                 const newDailyPoints = newTasks.filter(t => t.done).reduce((sum, t) => sum + t.points, 0);
 
-                try {
-                    await updateDoc(childDocRef, {
-                        [`dailyRecords.${viewDateString}.tasks`]: newTasks,
-                        [`dailyRecords.${viewDateString}.points`]: newDailyPoints,
-                        totalPoints: newTotalPoints
-                    });
-                } catch (error) { console.error("更新任務時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, tasks: newTasks, points: newDailyPoints } };
+                updateChildData({ ...child, totalPoints: newTotalPoints, dailyRecords: newDailyRecords });
             };
-            
-            const handleTaskPointsChange = async (taskId, change) => {
+
+            const handleTaskPointsChange = (taskId, change) => {
                 if (!isToday || !dailyData) return;
                 let pointsChangeForTotal = 0;
                 const newDailyTasks = dailyData.tasks.map(task => {
@@ -153,82 +128,71 @@
                 });
                 const newDailyPoints = newDailyTasks.filter(t => t.done).reduce((sum, t) => sum + t.points, 0);
                 const newTotalPoints = child.totalPoints + pointsChangeForTotal;
-                try {
-                    await updateDoc(childDocRef, {
-                        [`dailyRecords.${viewDateString}.tasks`]: newDailyTasks,
-                        [`dailyRecords.${viewDateString}.points`]: newDailyPoints,
-                        totalPoints: newTotalPoints
-                    });
-                } catch (error) { console.error("更新任務點數時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, tasks: newDailyTasks, points: newDailyPoints } };
+                updateChildData({ ...child, totalPoints: newTotalPoints, dailyRecords: newDailyRecords });
             };
 
-            const handleCustomTextChange = async (taskId, newText) => {
+            const handleCustomTextChange = (taskId, newText) => {
                 if (!isToday || !dailyData) return;
                 const newTasks = dailyData.tasks.map(t => t.id === taskId ? { ...t, customText: newText } : t);
-                try {
-                    await updateDoc(childDocRef, { [`dailyRecords.${viewDateString}.tasks`]: newTasks });
-                } catch (error) { console.error("更新自訂任務內容時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, tasks: newTasks } };
+                updateChildData({ ...child, dailyRecords: newDailyRecords });
             };
 
-            const handleAddTask = async (e) => {
+            const handleAddTask = (e) => {
                 e.preventDefault();
                 if (!newTaskName.trim() || !dailyData) return;
                 const newTask = { id: `task-${Date.now()}`, name: newTaskName.trim(), points: Number(newTaskPoints) };
                 const newMasterTasks = [...child.masterTasks, newTask];
                 const newDailyTasks = [...dailyData.tasks, { ...newTask, done: false }];
-                try {
-                    await updateDoc(childDocRef, { masterTasks: newMasterTasks, [`dailyRecords.${todayString}.tasks`]: newDailyTasks });
-                    setNewTaskName(''); setNewTaskPoints(1); setIsAddingTask(false);
-                } catch (error) { console.error("新增任務時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, tasks: newDailyTasks } };
+                updateChildData({ ...child, masterTasks: newMasterTasks, dailyRecords: newDailyRecords });
+                setNewTaskName(''); setNewTaskPoints(1); setIsAddingTask(false);
             };
 
-            const handleDeleteTask = async (taskId) => {
+            const handleDeleteTask = (taskId) => {
                 if (!isToday || !dailyData) return;
                 const newMasterTasks = child.masterTasks.filter(t => t.id !== taskId);
                 const newDailyTasks = dailyData.tasks.filter(t => t.id !== taskId);
-                try {
-                    await updateDoc(childDocRef, { masterTasks: newMasterTasks, [`dailyRecords.${todayString}.tasks`]: newDailyTasks });
-                } catch (error) { console.error("刪除任務時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, tasks: newDailyTasks } };
+                updateChildData({ ...child, masterTasks: newMasterTasks, dailyRecords: newDailyRecords });
             };
 
             // --- Bad Behavior Handlers ---
-            const handleBadBehaviorCountChange = async (behaviorId, change) => {
+            const handleBadBehaviorCountChange = (behaviorId, change) => {
                 if (!isToday || !dailyData) return;
                 const behavior = dailyData.badBehaviors.find(b => b.id === behaviorId);
                 if (!behavior || (change < 0 && behavior.count === 0)) return;
                 const pointsChange = -change * behavior.points;
                 const newTotalPoints = child.totalPoints + pointsChange;
                 const newBadBehaviors = dailyData.badBehaviors.map(b => b.id === behaviorId ? { ...b, count: b.count + change } : b);
-                try {
-                    await updateDoc(childDocRef, { [`dailyRecords.${todayString}.badBehaviors`]: newBadBehaviors, totalPoints: newTotalPoints });
-                } catch (error) { console.error("更新壞習慣計數時出錯: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, badBehaviors: newBadBehaviors } };
+                updateChildData({ ...child, totalPoints: newTotalPoints, dailyRecords: newDailyRecords });
             };
 
-            const handleAddBadBehavior = async (e) => {
+            const handleAddBadBehavior = (e) => {
                 e.preventDefault();
                 if (!newBadBehaviorName.trim() || !dailyData) return;
                 const newBehavior = { id: `bad-${Date.now()}`, name: newBadBehaviorName.trim(), points: 1 };
                 const newMasterBadBehaviors = [...child.masterBadBehaviors, newBehavior];
                 const newDailyBadBehaviors = [...dailyData.badBehaviors, { ...newBehavior, count: 0 }];
-                try {
-                    await updateDoc(childDocRef, { masterBadBehaviors: newMasterBadBehaviors, [`dailyRecords.${todayString}.badBehaviors`]: newDailyBadBehaviors });
-                    setNewBadBehaviorName(''); setIsAddingBadBehavior(false);
-                } catch (error) { console.error("新增壞習慣時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, badBehaviors: newDailyBadBehaviors } };
+                updateChildData({ ...child, masterBadBehaviors: newMasterBadBehaviors, dailyRecords: newDailyRecords });
+                setNewBadBehaviorName(''); setIsAddingBadBehavior(false);
             };
 
-            const handleDeleteBadBehavior = async (behaviorId) => {
+            const handleDeleteBadBehavior = (behaviorId) => {
                 if (!isToday || !dailyData) return;
                 const behaviorToDelete = dailyData.badBehaviors.find(b => b.id === behaviorId);
                 if (behaviorToDelete && behaviorToDelete.count > 0) { console.warn("不能刪除今天已經有紀錄的項目，請先將次數減為0。"); return; }
                 const newMasterBadBehaviors = child.masterBadBehaviors.filter(b => b.id !== behaviorId);
                 const newDailyBadBehaviors = dailyData.badBehaviors.filter(b => b.id !== behaviorId);
-                try {
-                    await updateDoc(childDocRef, { masterBadBehaviors: newMasterBadBehaviors, [`dailyRecords.${todayString}.badBehaviors`]: newDailyBadBehaviors });
-                } catch (error) { console.error("刪除壞習慣時發生錯誤: ", error); }
+                const newDailyRecords = { ...child.dailyRecords, [viewDateString]: { ...dailyData, badBehaviors: newDailyBadBehaviors } };
+                updateChildData({ ...child, masterBadBehaviors: newMasterBadBehaviors, dailyRecords: newDailyRecords });
             };
 
             // --- Redemption Handler ---
-            const handleRedeem = async (e) => {
+            const handleRedeem = (e) => {
                 e.preventDefault();
                 if (!redemptionItem.trim() || redemptionPoints <= 0) { console.warn("請輸入有效的兌換項目和點數。"); return; }
                 if (child.totalPoints < redemptionPoints) { console.warn("總點數不足！"); return; }
@@ -236,10 +200,8 @@
                 const newRedemption = { id: `redeem-${Date.now()}`, itemName: redemptionItem.trim(), pointsDeducted: Number(redemptionPoints), date: getDateString(new Date()) };
                 const currentHistory = child.redemptionHistory || [];
                 const newHistory = [...currentHistory, newRedemption];
-                try {
-                    await updateDoc(childDocRef, { totalPoints: newTotalPoints, redemptionHistory: newHistory });
-                    setRedemptionItem(''); setRedemptionPoints(10); setIsRedeeming(false);
-                } catch (error) { console.error("兌換點數時發生錯誤: ", error); }
+                updateChildData({ ...child, totalPoints: newTotalPoints, redemptionHistory: newHistory });
+                setRedemptionItem(''); setRedemptionPoints(10); setIsRedeeming(false);
             };
             
             return (
@@ -365,76 +327,53 @@
             const [children, setChildren] = React.useState(null);
             const [isLoading, setIsLoading] = React.useState(true);
             const [viewDate, setViewDate] = React.useState(new Date());
-            const [userId, setUserId] = React.useState(null);
 
-            // --- Firebase Auth and Data Loading ---
+            // --- Data Management using localStorage ---
             React.useEffect(() => {
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        setUserId(user.uid);
-                    } else {
-                        try {
-                            const userCredential = await signInAnonymously(auth);
-                            setUserId(userCredential.user.uid);
-                        } catch (error) {
-                            console.error("匿名登入失敗:", error);
-                            setIsLoading(false);
-                        }
+                let savedData;
+                try {
+                    savedData = JSON.parse(localStorage.getItem('kidsPointTrackerData'));
+                } catch (error) {
+                    console.error("無法解析 localStorage 資料:", error);
+                    savedData = null;
+                }
+                
+                let dataToUse = savedData || initialChildrenData;
+
+                // Logic to create today's record if it doesn't exist
+                const todayString = getDateString(new Date());
+                dataToUse = dataToUse.map(child => {
+                    if (!child.dailyRecords[todayString]) {
+                        const yesterday = new Date();
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        const yesterdayString = getDateString(yesterday);
+                        const yesterdayRecord = child.dailyRecords[yesterdayString];
+
+                        const newDailyRecord = {
+                            points: 0,
+                            tasks: child.masterTasks.map(masterTask => {
+                                const newDailyTask = { ...masterTask, done: false };
+                                if (masterTask.isCustomizable) {
+                                    newDailyTask.customText = yesterdayRecord?.tasks.find(t => t.id === masterTask.id)?.customText || '';
+                                }
+                                return newDailyTask;
+                            }),
+                            badBehaviors: child.masterBadBehaviors.map(b => ({ ...b, count: 0 }))
+                        };
+                        return { ...child, dailyRecords: { ...child.dailyRecords, [todayString]: newDailyRecord } };
                     }
+                    return child;
                 });
+
+                setChildren(dataToUse);
+                setIsLoading(false);
             }, []);
 
-            React.useEffect(() => {
-                if (!userId) return;
-
-                const unsubscribers = initialChildrenData.map(childData => {
-                    const childDocRef = doc(db, "users", userId, "children", childData.id);
-                    return onSnapshot(childDocRef, async (docSnap) => {
-                        let currentChildData = docSnap.data();
-                        
-                        if (!docSnap.exists()) {
-                            console.log(`為 ${childData.name} 創建初始資料...`);
-                            await setDoc(childDocRef, childData);
-                            currentChildData = childData;
-                        } else {
-                             const masterTasksChanged = JSON.stringify(currentChildData.masterTasks) !== JSON.stringify(defaultMasterTasks);
-                             if (masterTasksChanged) {
-                                 console.log(`為 ${currentChildData.name} 更新主要任務列表...`);
-                                 await updateDoc(childDocRef, { masterTasks: defaultMasterTasks });
-                                 currentChildData.masterTasks = defaultMasterTasks;
-                             }
-                        }
-
-                        const todayString = getDateString(new Date());
-                        if (!currentChildData.dailyRecords || !currentChildData.dailyRecords[todayString]) {
-                            const yesterday = new Date();
-                            yesterday.setDate(yesterday.getDate() - 1);
-                            const yesterdayString = getDateString(yesterday);
-                            const yesterdayRecord = currentChildData.dailyRecords ? currentChildData.dailyRecords[yesterdayString] : null;
-                            const newDailyRecord = {
-                                points: 0,
-                                tasks: currentChildData.masterTasks.map(masterTask => ({
-                                    ...masterTask,
-                                    done: false,
-                                    customText: masterTask.isCustomizable ? (yesterdayRecord?.tasks.find(t => t.id === masterTask.id)?.customText || '') : undefined
-                                })),
-                                badBehaviors: currentChildData.masterBadBehaviors.map(b => ({ ...b, count: 0 }))
-                            };
-                            await updateDoc(childDocRef, { [`dailyRecords.${todayString}`]: newDailyRecord });
-                        }
-
-                        setChildren(prev => {
-                            const others = prev ? prev.filter(c => c.id !== docSnap.id) : [];
-                            const updatedChildren = [...others, { id: docSnap.id, ...currentChildData }];
-                            updatedChildren.sort((a, b) => a.name.localeCompare(b.name));
-                            return updatedChildren;
-                        });
-
-                        setIsLoading(false);
-                    });
-                });
-                return () => unsubscribers.forEach(unsub => unsub());
-            }, [userId]);
+            const handleChildUpdate = (updatedChild) => {
+                const newChildren = children.map(c => c.id === updatedChild.id ? updatedChild : c);
+                setChildren(newChildren);
+                localStorage.setItem('kidsPointTrackerData', JSON.stringify(newChildren));
+            };
             
             const changeDate = (offset) => {
                 setViewDate(prevDate => {
@@ -471,15 +410,15 @@
                                 <ChildTracker 
                                     key={child.id} 
                                     child={child} 
-                                    viewDate={viewDate}
-                                    userId={userId}
+                                    onUpdate={handleChildUpdate}
+                                    isToday={isToday}
+                                    viewDateString={viewDateString}
                                 />
                             ))}
                         </main>
 
                         <footer className="text-center mt-12 text-gray-500">
-                             <p>資料已啟用雲端同步</p>
-                             <p className="text-xs">使用者ID: {userId || '登入中...'}</p>
+                             <p>資料儲存於您的本機瀏覽器中</p>
                         </footer>
                     </div>
                 </div>
